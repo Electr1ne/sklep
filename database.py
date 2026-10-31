@@ -30,7 +30,6 @@ def init_db():
     );
     """)
 
-    # Миграция колонок на случай обновления старой БД
     cols_to_add = [
         ("total_earned_points", "INTEGER DEFAULT 0"),
         ("safe_attempts", "INTEGER DEFAULT 5"),
@@ -101,7 +100,6 @@ def init_db():
     );
     """)
 
-    # Миграция колонок event_config
     config_cols = [
         ("safe_attempts_limit", "INTEGER DEFAULT 5"),
         ("safe_ban_duration_min", "INTEGER DEFAULT 30"),
@@ -151,7 +149,6 @@ def update_points(user_id: int, points_delta: int):
     conn.close()
 
 def record_spin_attempt(now_ts: int):
-    """Увеличивает общий счетчик сделанных круток для прогрессивного шанса."""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""

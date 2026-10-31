@@ -4,10 +4,9 @@ import string
 import asyncio
 import time
 import html
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Tuple, Optional, List
 
-import pytz
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart, ChatMemberUpdatedFilter, IS_ADMIN
@@ -33,7 +32,9 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 scheduler = AsyncIOScheduler()
-MSK_TZ = pytz.timezone("Europe/Moscow")
+
+# Встроенный UTC+3 без использования сторонней библиотеки pytz
+MSK_TZ = timezone(timedelta(hours=3))
 
 BOT_USERNAME = ""
 
@@ -80,33 +81,25 @@ class PostEditing(StatesGroup):
 # --- Динамический шанс рулетки (Pity System) ---
 
 def calculate_current_roulette_denominator(cfg) -> int:
-    """
-    Вычисляет динамический знаменатель шанса (1 к N).
-    Чем больше сделано неудачных спинов или чем ближе конец ивента, тем меньше N.
-    """
     spins = cfg["total_roulette_spins"] or 0
     base = 350
-
-    # Снижение знаменателя в зависимости от числа круток
-    # Каждые 10 круток знаменатель уменьшается на 10
     step_reduction = (spins // 10) * 12
     current_denom = max(2, base - step_reduction)
 
-    # Фактор времени МСК (если близится конец, а медведя не выбили)
     if cfg["start_time_msk"] and cfg["end_time_msk"]:
         fmt = "%d.%m.%Y %H:%M"
         try:
             now_msk = datetime.now(MSK_TZ)
-            start_dt = MSK_TZ.localize(datetime.strptime(cfg["start_time_msk"], fmt))
-            end_dt = MSK_TZ.localize(datetime.strptime(cfg["end_time_msk"], fmt))
+            start_dt = datetime.strptime(cfg["start_time_msk"].strip(), fmt).replace(tzinfo=MSK_TZ)
+            end_dt = datetime.strptime(cfg["end_time_msk"].strip(), fmt).replace(tzinfo=MSK_TZ)
             total_duration = (end_dt - start_dt).total_seconds()
             elapsed = (now_msk - start_dt).total_seconds()
 
             if total_duration > 0 and elapsed > 0:
                 progress = elapsed / total_duration
-                if progress >= 0.85:  # Осталось 15% времени
+                if progress >= 0.85:
                     current_denom = min(current_denom, 10)
-                elif progress >= 0.70:  # Прошло 70% времени
+                elif progress >= 0.70:
                     current_denom = min(current_denom, 25)
                 elif progress >= 0.50:
                     current_denom = min(current_denom, 75)
@@ -409,8 +402,8 @@ async def check_msk_schedule():
     fmt = "%d.%m.%Y %H:%M"
 
     try:
-        start_dt = MSK_TZ.localize(datetime.strptime(cfg["start_time_msk"], fmt))
-        end_dt = MSK_TZ.localize(datetime.strptime(cfg["end_time_msk"], fmt))
+        start_dt = datetime.strptime(cfg["start_time_msk"].strip(), fmt).replace(tzinfo=MSK_TZ)
+        end_dt = datetime.strptime(cfg["end_time_msk"].strip(), fmt).replace(tzinfo=MSK_TZ)
 
         if start_dt <= now_msk < end_dt:
             if not cfg["is_active"]:
@@ -563,7 +556,6 @@ async def cb_spin_animated(callback: CallbackQuery):
         await callback.answer("💀 Увы! Единственного Медведя из рулетки уже забрали!", show_alert=True)
         return
 
-    # Засчитываем попытку в общий пул счетчика круток
     db.record_spin_attempt(now_ts)
     cfg = db.get_event_config()
 
@@ -577,7 +569,6 @@ async def cb_spin_animated(callback: CallbackQuery):
         await callback.message.edit_text(frame, parse_mode="HTML")
         await asyncio.sleep(0.7)
 
-    # Расчет прогрессивного шанса
     current_denom = calculate_current_roulette_denominator(cfg)
     won = (random.randint(1, current_denom) == 1)
 
